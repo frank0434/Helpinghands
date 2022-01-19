@@ -18,8 +18,8 @@ p <- long_dt %>%
         title = element_text(size = 20), 
         legend.title = element_blank(),
         legend.text = element_text(size = 12))+
-  labs(title = "Nitrate (kg N/ha)", y = "", caption = "Mean values from a sample size of 39 in each size and depth." )
-ggsave("Data/heatmap.png",dpi = 500)
+  labs(title = "Nitrate-N (kg N/ha)", y = "", caption = "Mean values from a sample size of 39 in each size and depth." )
+ggsave("Data/heatmap.png", plot = p, dpi = 500, height = 7, width = 10.8)
 # ?heatmap
 # dim(data)
 # m <- as.matrix(data[,2:8])
