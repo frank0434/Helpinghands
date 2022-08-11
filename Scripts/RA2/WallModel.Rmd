@@ -1,0 +1,24 @@
+---
+title: "python for Wall paper"
+author: "Jian(Frank)"
+date: "07/04/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(reticulate)
+# source python
+# use_python("/Users/cflfcl/py/python.exe")
+# set up a virtual enviroment 
+# virtualenv_create(envname = "DHS_DAAV_RA2", python = "/Users/cflfcl/py/python.exe")
+use_virtualenv("DHS_DAAV_RA2", "/Users/cflfcl/py/python.exe")
+
+```
+```{python}
+
+
+
+```
+

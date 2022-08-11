@@ -1,0 +1,101 @@
+---
+title: "Jochum_JAE2017_Reproducable"
+author: "Tom MOore"
+date:  '`r Sys.Date()`'
+output: html_notebook
+---
+
+Install packages and functions
+```{r setpu, include = FALSE}
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[,"Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)}
+
+packages <- c( "tidyverse","readr","here")
+ipak(packages)
+```
+
+
+# Overview 
+
+The analysis was carried out in R version `r version$version.string`. 
+
+The analysis from the paper is reproduced here.
+
+# Datasets
+
+From https://datadryad.org/stash/dataset/doi:10.5061/dryad.qn119 downloaded the following files:
+
++ Jochum_JAE2017_Fig1_richness_coefs_confint.csv
++ Jochum_JAE2017_consumer_biomass.csv
++ Jochum_JAE2017_observed_consumer_richness.csv
++ Jochum_JAE2017_Fig2_biomass_coefs_confint.csv
++ Jochum_JAE2017_extrapolated_consumer_richness.csv
++ Jochum_JAE2017_predictors.csv
+
+```{r}
+fig1.coefs <- read.csv(file=here::here("Data/Jochum_2017/Jochum_JAE2017_Fig1_richness_coefs_confint.csv"))
+```
+
+# Simulate input data
+```{r}
+set.seed(1234)
+
+# Observations
+x <- 10
+
+df <- tibble::tibble(
+      LM = rnorm(x, mean = 10, sd = 4), # Adjusted to make the output more ecologically meaningful
+   prich = rpois(x,5),  
+      pH = rpois(x,5), # coefficient = 0 
+  'C:N'  = rnorm(x),
+  'C:P'  = rnorm(x, sd = 5), # Adjusted to make the output more ecologically meaningful
+  'C:K'  = rnorm(x),
+  'C:Ca' = rnorm(x),
+  'C:Mg' = rnorm(x),
+  'C:Na' = rnorm(x),
+  'C:S'  = rnorm(x)
+   )
+
+write.csv(df, file =here::here("Data/df_input_data.csv"))
+```
+
+
+# Species richness calculation
+
++ Coefficients extracted from global model not for individual taxonomic groups
++ Coefficients were based on standardized (x-mean/SD) predictors so output has no ecological meaning.
++ Most influential coefficients are LM & C:P 
++ No intercept provided
+
++ To get more "realistic" coefficients - would need to rerun analysis based on non-standardized data and back transform (exp).  
+```{r}
+Spp.Rich.coeff <- fig1.coefs %>% 
+                  filter(extrap_richness_response_group == 'all') %>%
+                  select(2:3)
+
+
+  df %>% 
+  # select the correct predictor
+  select(Spp.Rich.coeff$predictor) %>% 
+  # give each combination an unique id
+  mutate(row_id = 1:n()) %>% 
+  # transform to long format for calculation
+  pivot_longer(!row_id, names_to = "predictor") %>% 
+  # join the coefs
+  right_join(Spp.Rich.coeff) %>% 
+  # get the product of value and its coef
+  mutate(prod = value * coef) %>% 
+  # group by the combination of predicators
+  group_by(row_id)  %>% 
+  # get the product for each combination and round to integer
+  summarise(richness = round(sum(prod), digits = 0)) %>%
+  # remove negative values
+  mutate(richness = if_else(richness < 0, 0, richness),
+         row_id = paste0("Site ", row_id ))
+  
+  
+  
+```
