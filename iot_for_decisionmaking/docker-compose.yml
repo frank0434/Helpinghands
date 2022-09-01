@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+
+  shinyapp:
+      build:
+        context: .
+        dockerfile: DOCKERFILE
+      container_name: IoT_shiny
+      volumes:
+        - .:/code
+      ports:
+        - "3001:3838"
+      restart: unless-stopped

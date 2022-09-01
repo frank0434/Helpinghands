@@ -1,0 +1,12 @@
+influxdbr
+shiny
+shinydashboard
+shinyjs
+ggplot2
+DT
+data.table
+tinytex
+plotly
+openssl
+knitr
+rmarkdown

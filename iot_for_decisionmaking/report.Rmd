@@ -1,0 +1,32 @@
+---
+title: "IoT for Decision Making"
+date: "`r format(Sys.time(), ' %a %X, %d %B %Y', tz = 'Pacific/Auckland')`"
+output: pdf_document
+params:
+  overall: NA
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+options(knitr.kable.NA = '')
+```
+
+## Temperature information
+
+```{r crop info tab}
+knitr::kable(params$crop_info, caption = "Information about the crop")
+```
+
+## Biomass information 
+
+## Soil Water information 
+
+```{r}
+params$overall
+```
+
+
+
+## Acknowledgement 
+
+???

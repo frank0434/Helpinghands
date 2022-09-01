@@ -1,0 +1,15 @@
+version: '3'
+
+services:
+  dash_ra5:
+      build:
+        context: .
+        dockerfile: Dockerfile.dash
+      container_name: GF_MAHS_RA5
+      command: python app.py
+      volumes:
+        - .:/code
+      ports:
+        - "3007:3007"
+      restart: unless-stopped
+

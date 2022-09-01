@@ -1,0 +1,12 @@
+version: '3'
+
+services:
+  app:
+    build: .
+    image: atlas:0.92
+    restart: unless-stopped
+    user: shiny
+    ports:
+    - "4242:3838"
+    volumes:
+    - "/input/projects/ShinyClimateChange/Secrets/ClimateChange-dbcred_w.R:/srv/shiny-server/creds.R:z"

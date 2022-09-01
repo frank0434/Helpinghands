@@ -1,0 +1,15 @@
+FROM rocker/shiny:4.0.3
+LABEL maintainer jian.liu@plantandfood.co.nz
+
+ENV CTAN_REPO=http://mirror.ctan.org/systems/texlive/tlnet
+ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
+
+
+RUN /rocker_scripts/install_verse.sh
+
+RUN install2.r --error -r $CRAN --skipinstalled tinytex
+RUN install2.r --error --deps TRUE -r $CRAN --skipinstalled \
+   influxdbr shiny shinydashboard shinyjs ggplot2 DT data.table plotly openssl knitr rmarkdown
+
+COPY ./* /srv/shiny-server/
+
