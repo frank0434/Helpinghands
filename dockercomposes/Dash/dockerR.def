@@ -1,0 +1,35 @@
+
+Bootstrap: docker
+From: rocker/tidyverse:4.2.1
+
+%labels
+
+Maintainer Jian Liu
+Version 0.0.1
+
+#https://github.com/apptainer/singularity/issues/6181
+#%setup
+#  mkdir $SINGULARITY_ROOTFS/input
+  
+%environment
+DOTNET_CLI_TELEMETRY_OPTOUT=1
+export DOTNET_CLI_TELEMETRY_OPTOUT
+
+%post
+#R -e "options(repos = list(CRAN = 'https://cran.rstudio.com')); install.packages('remotes')"
+#R -e "remotes::install_github('r-lib/fs')"
+# libgsl is for RccpGSL package which is a dependence for sensobol package
+R -e "options(repos = list(CRAN = 'https://cran.rstudio.com')); install.packages('fs')"
+apt-get update
+apt-get -y install g++  
+apt-get install -y libpng-dev libgsl-dev curl libcurl4-openssl-dev libssl-dev libxml2-dev
+apt-get -y install apt-transport-https
+apt-get -y install zlib1g-dev
+apt-get -y install pandoc  
+
+
+R -e "options(repos = list(CRAN = 'https://cran.rstudio.com')); install.packages('renv')"
+
+%runscript
+exec R
+#https://github.com/rstudio/renv/issues/1005
