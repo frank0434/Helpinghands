@@ -1,0 +1,303 @@
+---
+title: "FLIR temperature"
+output: html_notebook
+---
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+#load packages
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(lubridate)
+# library(car)
+library(cowplot)
+# setwd("C:/Users/cheet/OneDrive - Wageningen University & Research/thesis_josias_brian_shared/Josias and Brian")
+
+```
+
+#Read in irrigation data
+```{r}
+df_irrigation <- read_excel("C:/Users/liu283/OneDrive - Wageningen University & Research/thesis_josias_brian_shared/Josias and Brian/data/raw/EasyManagement.xlsx", sheet = "irr_minutes", col_names = TRUE, range = "A1:G37")
+
+
+df_irrigation <- df_irrigation%>%
+  slice(4:n()) %>%
+  mutate(rel_irr2 = T2/T1,
+         rel_irr3 = T3/T1
+        )
+```
+
+#Make relative irrigaton plot
+```{r}
+plot_rel_irr <- ggplot(df_irrigation, aes(x = as.Date(Date))) +
+  geom_line(aes(y = rel_irr2, color = "blue")) +
+  geom_line(aes(y = rel_irr3, color = "red")) +
+  scale_color_manual(values = c("blue" = "blue", "red" = "red"),
+                     labels = c("Freq 2", "Freq 3")) +
+  labs(color = "Frequency") +
+  theme(axis.title.x = element_blank()) +
+  ylab("Irrigation relative to frequency 1")
+
+plot_rel_irr
+grob_rel_irr <- ggplotGrob(plot_rel_irr)
+
+```
+
+#Read in data
+```{r}
+df_FLIR_filt <- read_csv("C:/Users/liu283/OneDrive - Wageningen University & Research/thesis_josias_brian_shared/Josias and Brian/data/processed/FLIR/1hourly/FLIR_kenn_1hourly.csv")
+df_Air_temp <- read_csv("C:/Users/liu283/OneDrive - Wageningen University & Research/thesis_josias_brian_shared/Josias and Brian/data/processed/FLIR/FLIRMatchedRHTemp1hourly.csv")
+df_Air_temp$date <- dmy(df_Air_temp$date)
+```
+#Merge air temperature onto canopy DF
+```{r}
+# merge the two data frames on "date" column
+df_merged <- merge(df_FLIR_filt, df_Air_temp, by = "date", all.x = TRUE)
+```
+
+
+```{r}
+# create a new data frame with desired values using mutate
+new_df <- df_merged %>% 
+  mutate(AirTemp = ifelse(is.na(AirTemp), 0, AirTemp),
+         RH = ifelse(is.na(RH), 0, RH))
+
+# AirTemp and RH columns will have 0 values in case of missing values
+
+```
+
+#Calculate difference between canopy and air temperature
+```{r}
+df_merged <- df_merged %>%
+  mutate(delta_t = temp - AirTemp) %>%
+  rename(CanopyTemp = temp)
+```
+
+#Visualise data
+
+```{r}
+# Create plot for the filtered data (Each plot, different colour per treatment)
+ggplot(df_merged, aes(x = date, y = CanopyTemp, color = factor(treat))) +
+  geom_point() +
+  facet_wrap(~ plot)
+```
+```{r}
+ggplot(df_merged, aes(x = factor(date), y = CanopyTemp, color = factor(treat))) +
+  geom_boxplot() +
+  facet_wrap(~ treat, nrow = 6)
+```
+
+```{r}
+plot_daily_temp <- ggplot(df_merged, aes(x = factor(date), y = CanopyTemp, color = factor(w_amount))) +
+  geom_boxplot() +
+  geom_point(aes(x = factor(date), y = AirTemp), color = "green") +
+  facet_wrap(~ ir_freq, nrow = 3) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  #ggtitle("FLIR: Daily temperature over time") +
+  ylab("Temperature") +
+  xlab("Date") +
+  labs(color = "Water amount")
+plot_daily_temp
+grob_daily_temp <- ggplotGrob(plot_daily_temp)
+```
+
+```{r}
+ggplot(df_merged, aes(x = factor(date), y = CanopyTemp, color = factor(ir_freq))) +
+  geom_boxplot() +
+  geom_point(aes(x = factor(date), y = AirTemp), color = "green") +
+  facet_wrap(~ w_amount, nrow = 2) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ggtitle("FLIR: Daily temperature over time") +
+  ylab("Temperature") +
+  xlab("Date") +
+  labs(color = "Irrigation frequency")
+```
+```{r}
+#ANOVA
+df_merged$w_amount <- factor(df_merged$w_amount)
+df_merged$ir_freq <- factor(df_merged$ir_freq)
+# Perform ANOVA
+flir_anova_CanopyTemp <- aov(CanopyTemp ~ w_amount*ir_freq + w_amount + ir_freq, data = df_merged)
+flir_anova_delta_t <- aov(delta_t ~ w_amount*ir_freq + w_amount + ir_freq, data = df_merged)
+
+```
+
+```{r}
+# Summarize ANOVA results
+summary(flir_anova_CanopyTemp)
+plot(flir_anova_CanopyTemp)
+#slightly thin/light tailed distribution
+```
+
+
+```{r}
+TukeyHSD(flir_anova_CanopyTemp)
+```
+
+```{r}
+mean_se_temp <- df_merged %>% 
+  group_by(ir_freq, w_amount) %>% 
+  summarize(mean = mean(CanopyTemp),
+            se = sd(CanopyTemp)/sqrt(n()))
+mean_se_temp_w_amount <- df_merged %>% 
+  group_by(w_amount) %>% 
+  summarize(mean = mean(CanopyTemp),
+            se = sd(CanopyTemp)/sqrt(n()))
+```
+
+
+```{r}
+ggplot(df_merged, aes(x = factor(date), y = delta_t, color = factor(w_amount))) +
+  geom_boxplot() +
+  facet_wrap(~ ir_freq, nrow = 3) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ggtitle("FLIR: Difference between canopy and air temperature over time") +
+  ylab("Temperature difference") +
+  xlab("Date") +
+  labs(color = "Water amount")
+```
+
+```{r}
+# Summarize ANOVA results
+summary(flir_anova_delta_t)
+plot(flir_anova_delta_t)
+#Distribution looks good (i.e. close to normal distribution)
+```
+```{r}
+TukeyHSD(flir_anova_delta_t)
+```
+
+```{r}
+# First, run the Tukey HSD test and store the results in an object
+tukey_test <- TukeyHSD(flir_anova_delta_t)
+
+# Load the multcomp package
+library(multcomp)
+
+# Use the glht function to get the letters
+letters <- glht(flir_anova_delta_t, linfct = mcp(treat = "Tukey"))
+
+# Extract the letters using the summary function
+summary_letters <- summary(letters)$`test$pvalues`[,4]
+
+
+# First, run the Tukey HSD test and store the results in an object
+tukey_test <- TukeyHSD(flir_anova_delta_t)
+
+# Load the multcomp package
+library(multcomp)
+
+# Use the glht function to get the letters
+letters <- glht(flir_anova_delta_t, linfct = mcp(w_amount*ir_freq = "Tukey"))
+
+# Extract the letters using the summary function
+summary_letters <- summary(letters)$`test$pvalues`[,4]
+
+```
+
+
+```{r}
+mean_se_deltaT <- df_merged %>% 
+  group_by(ir_freq, w_amount) %>% 
+  summarize(mean = mean(delta_t),
+            se = sd(delta_t)/sqrt(n()))
+```
+
+
+#Cowplot
+```{r}
+# Subset the data for each level of ir_freq
+df_merged_freq1 <- filter(df_merged, ir_freq == 1)
+df_merged_freq2 <- filter(df_merged, ir_freq == 2)
+df_merged_freq3 <- filter(df_merged, ir_freq == 3)
+```
+
+
+```{r}
+# Create a separate ggplot for each subset
+plot_freq1 <- ggplot(df_merged_freq1, aes(x = factor(date), y = CanopyTemp, color = factor(w_amount))) +
+  geom_boxplot() +
+  geom_point(aes(x = factor(date), y = AirTemp), color = "green") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ggtitle("FLIR: Daily temperature over time (ir_freq = 1)") +
+  ylab("Temperature") +
+  xlab("Date") +
+  labs(color = "Water amount")
+```
+
+
+```{r}
+plot_freq2 <- ggplot(df_merged_freq2, aes(x = factor(date), y = CanopyTemp, color = factor(w_amount))) +
+  geom_boxplot() +
+  geom_point(aes(x = factor(date), y = AirTemp), color = "green") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ggtitle("FLIR: Daily temperature over time (ir_freq = 2)") +
+  ylab("Temperature") +
+  xlab("Date") +
+  labs(color = "Water amount")
+```
+
+
+```{r}
+plot_freq3 <- ggplot(df_merged_freq3, aes(x = factor(date), y = CanopyTemp, color = factor(w_amount))) +
+  geom_boxplot() +
+  geom_point(aes(x = factor(date), y = AirTemp), color = "green") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ggtitle("FLIR: Daily temperature over time (ir_freq = 3)") +
+  ylab("Temperature") +
+  xlab("Date") +
+  labs(color = "Water amount")
+```
+
+```{r, fig.width=10, fig.height=7}
+plot_grid(grob_rel_irr, grob_daily_temp, ncol = 1, height = c(0.1, 4))
+# create a theme function to modify the plot margin 
+theme_no_xaxis <- function(){
+ #  theme_classic()+
+  theme(axis.title.x = element_blank(), # remove unnecessary x axis
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(),
+        legend.position = "none", # strip the legend
+        # set plot margin to 0 
+        plot.margin = unit(c(0,0,0,0), "mm"))
+}
+
+# a new irrigation plot for the composite 
+plot_rel_irr2 <- ggplot(df_irrigation, aes(x = as.Date(Date))) +
+  geom_line(aes(y = rel_irr2, color = "blue")) +
+  geom_line(aes(y = rel_irr3, color = "red")) +
+  scale_color_manual(values = c("blue" = "blue", "red" = "red"),
+                     labels = c("Freq 2", "Freq 3")) +
+  labs(color = "Frequency") +
+  theme_no_xaxis()+
+  # theme(plot.margin = unit(c(1,1,1,1), "lines"))+
+  ylab("Irrigation relative \n to frequency 1")
+# get the legend from the first irrigation plot
+legend_irr <- get_legend(plot_rel_irr)
+# get the legend for the frequence 
+legend_freq <- get_legend(plot_freq1)
+# create the main plot 
+main <- plot_grid(plot_rel_irr2, 
+          NULL, # use null and negative values in the rel_height to reduce the gap
+          plot_freq1 +   
+            theme_no_xaxis() +
+            ggtitle("") , # remove title 
+          NULL,
+          plot_freq2 +   
+            theme_no_xaxis() +
+            ggtitle(""),
+          NULL,
+          plot_freq3+ theme(legend.position = "none") +
+            ggtitle(""),
+          align = "hv", ncol = 1, axis = "tb",
+          labels = c("a", "", "b", "", "c", "","d"), 
+          label_x = 0.1, label_y = 0.9,
+          rel_heights = c(1,-0.3, 1, -0.4, 1, -0.4, 1))
+# assemble the legend
+legend <- plot_grid(legend_irr, legend_freq, ncol = 1)
+# assemble legend and main plot 
+plot_grid(main, legend, rel_widths = c(0.9, 0.1))
+```
+

@@ -1,0 +1,546 @@
+---
+title: "Soil temperature"
+output: html_notebook
+---
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+#load packages
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(lubridate)
+#library(chunked)
+```
+
+#Set working directory
+
+```{r}
+#setwd("C:/Users/cheet/OneDrive - Wageningen University & Research/thesis_josias_brian_shared/Josias and Brian")
+```
+
+#Read in data
+
+```{r}
+soil <- read_csv("C:/Users/liu283/OneDrive - Wageningen University & Research/thesis_josias_brian_shared/Josias and Brian/data/processed/button/soil.csv")
+```
+
+# Create new columns for water amount and irrigation frequency
+
+```{r}
+soil_new <- soil %>%
+  mutate(w_amount = case_when(
+    treatment %in% c("i1", "i2", "i3") ~ 1,
+    treatment %in% c("i4", "i5", "i6") ~ 0.65,
+    TRUE ~ NA_real_
+  )) %>% 
+  mutate(
+  ir_freq = case_when(
+    treatment %in% c("i1", "i4") ~ 1,
+    treatment %in% c("i2", "i5") ~ 2,
+    treatment %in% c("i3", "i6") ~ 3,
+    TRUE ~ NA_real_
+  ))
+soil_new$w_amount <- as.factor(soil_new$w_amount)
+soil_new$ir_freq <- as.factor(soil_new$ir_freq)
+```
+
+#Create dataframe containing the start dates of irrigation for frequencies 2 and 3
+```{r}
+#Used for indicating irrigation timings and facilitate analysis
+freq_2 <- c("2022-12-16 12:00:00", "2023-01-01 12:00:00", "2023-01-21 12:00:00", "2023-02-10 12:00:00")
+freq_3 <- c("2022-12-22 12:00:00", "2023-01-07 12:00:00", "2023-01-27 12:00:00", "2023-02-10 12:00:00")
+freq_2_datetime <- as.POSIXct(freq_2, format="%Y-%m-%d %H:%M:%S")
+freq_3_datetime <- as.POSIXct(freq_3, format="%Y-%m-%d %H:%M:%S")
+ir_dates <- data.frame(freq_2=freq_2_datetime, freq_3=freq_3_datetime, point2=c(21,21,21,21), point3=c(20,20,20,20))
+```
+
+
+#Plot temperature over time for each plot
+
+```{r}
+ggplot(soil_new, aes(x=time, y=temp)) +
+  geom_point() +
+  facet_wrap(~ Plot)
+```
+
+#p09 and p12 were removed from the soil and have bad data after a certain point
+
+#Remove these data points
+
+```{r}
+# Filter data for the desired plot to determine at which point sensor was taken out of the soil
+soil_plot09 <- soil_new %>% filter(Plot == "p09")
+#view(soil_plot09)
+
+soil_plot12 <- soil_new %>% filter(Plot == "p12")
+#view(soil_plot12)
+soil_plot20 <- soil_new %>% filter(Plot == "p20")
+soil_plot25 <- soil_new %>% filter(Plot == "p25")
+soil_plot48 <- soil_new %>% filter(Plot == "p48")
+
+
+#big jump in temperature on 12.02.23 between 4:30 and 5:30 for both plots
+
+# Create new column with filtered temperature values ignoring the values recorded out of the soil
+#soil_filtered <- soil_new %>%
+ # mutate(temp = case_when(
+  #  Plot %in% c("p09", "p12") & time > "2023-02-12 04:30:27" ~ NA_real_,
+   # TRUE ~ temp
+  #))
+soil_filtered <- soil_new %>%
+  filter(!(Plot %in% c("p09", "p12") & time > "2023-02-12 04:30:27"))
+```
+
+```{r}
+ggplot(soil_plot09, aes(x = time, y = temp)) +
+  geom_line()
+ggplot(soil_plot20, aes(x = time, y = temp)) +
+  geom_line()
+ggplot(soil_plot25, aes(x = time, y = temp)) +
+  geom_line()
+ggplot(soil_plot48, aes(x = time, y = temp)) +
+  geom_line()
+```
+
+#Visualise data
+
+```{r}
+# Create plot for the filtered data (Each plot, different colour per treatment)
+ggplot(soil_filtered, aes(x = time, y = temp, color = treatment)) +
+  geom_point() +
+  facet_wrap(~ Plot)
+  
+
+```
+
+```{r}
+# Create plot for the filtered data (Grouped by treatment)
+ggplot(soil_filtered, aes(x = time, y = temp, color = treatment)) +
+  geom_point() +
+  #geom_line(aes(group = treatment)) +    #Line graph (not really useful)
+  facet_grid(~ treatment)
+```
+
+#Plot mean daily temperature over time grouped by treatment
+
+```{r}
+# Calculate mean daily temperature and group by day
+soil_summary <- soil_filtered %>%
+  mutate(date = as.Date(time)) %>%
+  group_by(date, treatment) %>%
+  summarize(mean_temp = mean(temp, na.rm = TRUE))
+
+# Create plot
+ggplot(soil_summary, aes(x = date, y = mean_temp, color = treatment)) +
+  geom_line() +
+  labs(x = "Date", y = "Mean temperature", color = "Treatment") +
+  scale_x_date(date_labels = "%m/%d") #+
+  theme_minimal()
+```
+
+##Plot min daily temperature over time grouped by treatment (Not sure why i2 suddenly goes up. probably didn't filter errorneous data correctly.)
+
+```{r}
+# Calculate minimum daily temperature and group by day
+soil_summary <- soil_filtered %>%
+  mutate(date = as.Date(time)) %>%
+  group_by(date, w_amount, ir_freq) %>%
+  summarize(min_temp = min(temp, na.rm = TRUE),
+            max_temp = max(temp, na.rm = TRUE),
+            mean_temp = mean(temp, na.rm = TRUE)
+            )
+```
+
+```{r}
+# Create plot
+ggplot(soil_summary, aes(x = date, color = w_amount)) +
+  geom_point(aes(y = mean_temp), data = soil_summary) +
+  geom_point(aes(y = min_temp), data = soil_summary) +
+  geom_point(aes(y = max_temp), data = soil_summary) +
+  ggtitle("Daily average, maximum, and minimum soil temperature") +
+  xlab("Date") +
+  ylab("Temperature (°C)")  +
+  theme_minimal()
+```
+
+```{r}
+# Create plot
+ggplot(soil_summary, aes(x = date, color = w_amount)) +
+  geom_line(aes(y = mean_temp), data = soil_summary) +
+  geom_line(aes(y = min_temp), data = soil_summary) +
+  geom_line(aes(y = max_temp), data = soil_summary) +
+  facet_wrap(~ ir_freq,, nrow = 3) +
+  ggtitle("Daily average, maximum, and minimum soil temperature") +
+  xlab("Date") +
+  ylab("Temperature (°C)")  +
+  theme_minimal()
+```
+
+#Anova on daily min,max,mean temp
+```{r}
+#ANOVA
+# Perform ANOVA
+mean_temp_anova <- aov(mean_temp ~ w_amount*ir_freq + w_amount + ir_freq, data = soil_summary)
+min_temp_anova <- aov(min_temp ~ w_amount*ir_freq + w_amount + ir_freq, data = soil_summary)
+max_temp_anova <- aov(max_temp ~ w_amount*ir_freq + w_amount + ir_freq, data = soil_summary)
+```
+
+```{r}
+# Summarize ANOVA results
+summary(mean_temp_anova)
+plot(mean_temp_anova)
+#Bimodal or light-tailed
+```
+```{r}
+shapiro.test(residuals(mean_temp_anova))
+leveneTest(residuals(mean_temp_anova) ~ interaction(w_amount, ir_freq), data = soil_summary)
+```
+```{r}
+# Summarize ANOVA results
+summary(min_temp_anova)
+plot(min_temp_anova)
+#Bimodal? possibly light-tailed
+```
+```{r}
+shapiro.test(residuals(min_temp_anova))
+leveneTest(residuals(min_temp_anova) ~ interaction(w_amount, ir_freq), data = soil_summary)
+```
+```{r}
+# Summarize ANOVA results
+summary(max_temp_anova)
+plot(max_temp_anova)
+#light-tailed
+```
+```{r}
+shapiro.test(residuals(max_temp_anova))
+leveneTest(residuals(max_temp_anova) ~ interaction(w_amount, ir_freq), data = soil_summary)
+```
+#Non-parametric test
+```{r}
+df_daily_median <- soil_filtered %>%
+  mutate(date = as.Date(time)) %>%
+  group_by(treatment, date, w_amount, ir_freq) %>%
+  summarize(median_temp = median(temp),
+            max_temp = median(temp[temp == max(temp)]),
+            min_temp = median(temp[temp == min(temp)])
+  )
+```
+```{r}
+mean_se_soil <- soil_filtered %>% 
+  group_by(ir_freq, w_amount) %>% 
+  summarize(median = median(temp),
+            se_median = sd(temp)/sqrt(n()),
+            median_max = median(temp[temp == max(temp)]),
+            se_max = sd(temp)/sqrt(n()),
+            median_min = median(temp[temp == min(temp)]),
+            se_min = sd(temp)/sqrt(n()))
+```
+
+```{r}
+# Create plot
+ggplot(df_daily_median, aes(x = date, color = factor(w_amount))) +
+  geom_line(aes(y = median_temp), data = df_daily_median) +
+  geom_line(aes(y = min_temp), data = df_daily_median) +
+  geom_line(aes(y = max_temp), data = df_daily_median) +
+  facet_wrap(~ ir_freq,, nrow = 3) +
+  ggtitle("Daily median, maximum, and minimum soil temperature") +
+  xlab("Date") +
+  ylab("Temperature (°C)")  +
+  theme_minimal()
+```
+
+```{r}
+kruskal.test(median_temp ~ interaction(w_amount, ir_freq), data = df_daily_median)
+kruskal.test(max_temp ~ interaction(w_amount, ir_freq), data = df_daily_median)
+kruskal.test(min_temp ~ interaction(w_amount, ir_freq), data = df_daily_median)
+```
+
+```{r}
+pairwise.wilcox.test(df_daily_median$max_temp, df_daily_median$treatment, p.adjust.method = "bonferroni")
+```
+
+```{r}
+# First, run the pairwise Wilcoxon rank sum test and store the results in an object
+pairwise_test <- pairwise.wilcox.test(df_daily_median$max_temp, df_daily_median$treatment, p.adjust.method = "bonferroni")
+
+# Load the multcompView package
+library(multcompView)
+
+# Use the multcompLetters function to get the letters for pairwise comparisons
+letters <- multcompLetters(pairwise_test$p.value)
+```
+
+
+```{r}
+# Create a box plot
+ggplot(df_daily_median, aes(x = interaction(w_amount, ir_freq), y = max_temp)) +
+  geom_boxplot() +
+  xlab("Interaction of w_amount and ir_freq") +
+  ylab("Max Temperature in soil") +
+  ggtitle("Distribution of Max Temperature in soil by Group")
+
+# Create a histogram
+ggplot(df_daily_median, aes(x = max_temp, fill = interaction(w_amount, ir_freq))) +
+  geom_histogram(bins = 30, alpha = 0.5) +
+  xlab("Max Temperature in soil") +
+  ylab("Frequency") +
+  ggtitle("Distribution of Max Temperature in soil by Group") +
+  facet_wrap(~interaction(w_amount, ir_freq))
+```
+
+
+
+#Boxplot of temperature over time facet wrapped by trt (time series of boxplots to see trendline and variance)
+
+```{r}
+soil_boxplot <- soil_filtered %>%
+    mutate(date = as.Date(time)) %>%
+    group_by(date)
+ggplot(soil_boxplot, aes(x = factor(date), y = temp, color = treatment)) +
+  geom_boxplot() +
+  facet_wrap(~ treatment, nrow = 6)
+```
+```{r}
+soil_boxplot <- soil_filtered %>%
+    mutate(date = as.Date(time)) %>%
+    group_by(date)
+ggplot(soil_boxplot, aes(x = factor(date), y = temp, color = w_amount)) +
+  geom_boxplot() +
+  facet_wrap(~ ir_freq, nrow = 3)
+```
+```{r}
+soil_boxplot <- soil_filtered %>%
+    mutate(date = as.Date(time)) %>%
+    group_by(date)
+ggplot(soil_boxplot, aes(x = factor(date), y = temp, color = ir_freq)) +
+  geom_boxplot() +
+  facet_wrap(~ w_amount, nrow = 2)
+```
+#Resample data for hourly mean of the four replicates
+```{r}
+# Group data by three-hour intervals and calculate mean value
+soil_filt_1h <- soil_filtered %>%
+  group_by(treatment, w_amount, ir_freq, interval = cut(time, breaks = "1 hours")) %>%
+  summarize(mean_temp = mean(temp, na.rm = TRUE))
+
+soil_filt_1h$interval <- as.POSIXct(soil_filt_1h$interval, format = "%Y-%m-%d %H:%M:%S")
+
+# View new data table
+soil_filt_1h
+```
+
+#Plot hourly mean temperature over time, facet wrapped by irrigation frequency (100% and 65% in one plot)
+
+```{r}
+ggplot(soil_filt_1h, aes(x = interval, y = mean_temp, color = w_amount)) +
+  geom_line() +
+  geom_point(data = ir_dates, aes(x = freq_2, y = point2), color = "red") +
+  geom_point(data = ir_dates, aes(x = freq_3, y = point3), color = "blue") +
+  facet_wrap(~ ir_freq, nrow = 3) +
+  ggtitle("Soil temperature over time (hourly)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
+
+#Plot hourly mean temperature over time, facet wrapped by water amount (all frequencies in one plot)
+
+```{r}
+ggplot(soil_filt_1h, aes(x = interval, y = mean_temp, color = ir_freq)) +
+  geom_line() +
+  geom_point(data = ir_dates, aes(x = freq_2, y = point2), color = "red") +
+  geom_point(data = ir_dates, aes(x = freq_3, y = point3), color = "blue") +
+  facet_wrap(~ w_amount, nrow = 2) +
+  ggtitle("Soil temperature over time (hourly)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
+#Filter data to only look at one irrigation interval (+ one week to see "lag" of temperature changes)
+```{r}
+start_date1 <- as.POSIXct("2022-12-08 00:00:00")
+end_date1 <- as.POSIXct("2023-01-03 00:00:00")
+soil_1st_int <- subset(soil_filt_1h, interval > start_date1 & interval < end_date1)
+
+start_date2 <- as.POSIXct("2022-12-28 00:00:00")
+end_date2 <- as.POSIXct("2023-01-19 00:00:00")
+soil_2nd_int <- subset(soil_filt_1h, interval > start_date2 & interval < end_date2)
+
+start_date3 <- as.POSIXct("2023-01-13 00:00:00")
+end_date3 <- as.POSIXct("2023-02-09 00:00:00")
+soil_3rd_int <- subset(soil_filt_1h, interval > start_date3 & interval < end_date3)
+
+start_date4 <- as.POSIXct("2023-02-02 00:00:00")
+end_date4 <- as.POSIXct("2023-02-24 00:00:00")
+soil_4th_int <- subset(soil_filt_1h, interval > start_date4 & interval < end_date4)
+```
+
+```{r}
+ggplot(soil_2nd_int, aes(x = interval, y = mean_temp, color = ir_freq)) +
+  geom_line() +
+  #geom_vline(xintercept = as.numeric(as.POSIXct("2023-01-21 12:00:00"))) +
+  #geom_point(x = c("2023-01-21 12:00:00", "2023-01-27 12:00:00"), y = c(20, 21))
+  geom_point(aes(x = as.POSIXct("2023-01-01 12:00:00"), y = 20), color = "red") +
+  geom_point(aes(x = as.POSIXct("2023-01-07 12:00:00"), y = 20), color = "blue") +
+  facet_wrap(~ w_amount, nrow = 2) +
+  ggtitle("Soil temperature over time (hourly, 2nd irrigation interval)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
+```{r}
+ggplot(soil_2nd_int, aes(x = interval, y = mean_temp, color = w_amount)) +
+  geom_line() +
+  #geom_vline(xintercept = as.numeric(as.POSIXct("2023-01-21 12:00:00"))) +
+  #geom_point(x = c("2023-01-21 12:00:00", "2023-01-27 12:00:00"), y = c(20, 21))
+  geom_point(aes(x = as.POSIXct("2023-01-01 12:00:00"), y = 20), color = "red") +
+  geom_point(aes(x = as.POSIXct("2023-01-07 12:00:00"), y = 20), color = "blue") +
+  facet_wrap(~ ir_freq, nrow = 3) +
+  ggtitle("Soil temperature over time (hourly, 2nd irrigation interval)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
+
+```{r}
+ggplot(soil_3rd_int, aes(x = interval, y = mean_temp, color = ir_freq)) +
+  geom_line() +
+  #geom_vline(xintercept = as.numeric(as.POSIXct("2023-01-21 12:00:00"))) +
+  #geom_point(x = c("2023-01-21 12:00:00", "2023-01-27 12:00:00"), y = c(20, 21))
+  geom_point(aes(x = as.POSIXct("2023-01-21 12:00:00"), y = 20), color = "red") +
+  geom_point(aes(x = as.POSIXct("2023-01-27 12:00:00"), y = 20), color = "blue") +
+  facet_wrap(~ w_amount, nrow = 2) +
+  ggtitle("Soil temperature over time (hourly, 3rd irrigation interval)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
+```{r}
+ggplot(soil_3rd_int, aes(x = interval, y = mean_temp, color = w_amount)) +
+  geom_line() +
+  #geom_vline(xintercept = as.numeric(as.POSIXct("2023-01-21 12:00:00"))) +
+  #geom_point(x = c("2023-01-21 12:00:00", "2023-01-27 12:00:00"), y = c(20, 21))
+  geom_point(aes(x = as.POSIXct("2023-01-21 12:00:00"), y = 20), color = "red") +
+  geom_point(aes(x = as.POSIXct("2023-01-27 12:00:00"), y = 20), color = "blue") +
+  facet_wrap(~ ir_freq, nrow = 3) +
+  ggtitle("Soil temperature over time (hourly, 3rd irrigation interval)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
+
+#Resample data to larger intervalls to reduce business
+```{r}
+# Group data by day and summarize values
+daily_data <- soil_filtered %>%
+  mutate(date = as.Date(time)) %>%
+  group_by(date, treatment) %>%
+  summarize(temp = mean(temp))
+
+# View new data table
+daily_data
+```
+
+#Resample data to reduce business (3-hourly, currently loses most other information)
+```{r}
+# Group data by three-hour intervals and calculate mean value
+soil_filt_3h <- soil_filtered %>%
+  group_by(treatment, w_amount, ir_freq, interval = cut(time, breaks = "3 hours")) %>%
+  summarize(mean_temp = mean(temp, na.rm = TRUE))
+
+soil_filt_3h$interval <- as.POSIXct(soil_filt_3h$interval, format = "%Y-%m-%d %H:%M:%S")
+
+# View new data table
+soil_filt_3h
+```
+```{r}
+ggplot(soil_filt_3h, aes(x = interval, y = mean_temp, color = treatment)) +
+  geom_point() +
+  facet_wrap(~ treatment, nrow = 6)
+```
+```{r}
+ggplot(soil_filt_3h, aes(x = interval, y = mean_temp, color = treatment)) +
+  geom_line()
+```
+
+```{r}
+ggplot(soil_filtered, aes(x = time, y = temp, color = w_amount)) +
+  geom_line() +
+  geom_point(data = ir_dates, aes(x = freq_2, y = point2), color = "red") +
+  geom_point(data = ir_dates, aes(x = freq_3, y = point3), color = "blue") +
+  facet_wrap(~ ir_freq, nrow = 3) +
+  ggtitle("Soil temperature over time (hourly)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
+
+```{r}
+ggplot(soil_filtered, aes(x = time, y = temp, color = ir_freq)) +
+  geom_line() +
+  geom_point(data = ir_dates, aes(x = freq_2, y = point2), color = "red") +
+  geom_point(data = ir_dates, aes(x = freq_3, y = point3), color = "blue") +
+  facet_wrap(~ w_amount, nrow = 2) +
+  ggtitle("Soil temperature over time (hourly)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
+
+```{r}
+ggplot(soil_filt_3h, aes(x = interval, y = mean_temp, color = treatment)) +
+  geom_line() +
+  geom_vline(xintercept = as.numeric(as.POSIXct(c("2022-12-22 12:00:00", "2022-01-07 12:00:00", "2022-01-27 12:00:00", "2022-02-10 12:00:00")))) +
+  facet_wrap(~ treatment)
+```
+
+#Plot 3-hourly data separated by amount and frequency
+```{r}
+ggplot(soil_filt_3h, aes(x = interval, y = mean_temp, color = w_amount)) +
+  geom_line() +
+  geom_point(data = ir_dates, aes(x = freq_2, y = point2), color = "red") +
+  geom_point(data = ir_dates, aes(x = freq_3, y = point3), color = "blue") +
+  facet_wrap(~ ir_freq, nrow = 3) +
+  ggtitle("Soil temperature over time (3-hourly)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
+
+```{r}
+ggplot(soil_filt_3h, aes(x = interval, y = mean_temp, color = ir_freq)) +
+  geom_line() +
+  geom_point(data = ir_dates, aes(x = freq_2, y = point2), color = "red") +
+  geom_point(data = ir_dates, aes(x = freq_3, y = point3), color = "blue") +
+  facet_wrap(~ w_amount, nrow = 2) +
+  ggtitle("Soil temperature over time (3-hourly)") +
+  xlab("Date") +
+  ylab("Temperature")
+
+```
+
+#Resample data to reduce business (6-hourly, currently loses most other information)
+```{r}
+# Group data by three-hour intervals and calculate mean value
+soil_filt_6h <- soil_filtered %>%
+  group_by(treatment, w_amount, ir_freq, interval = cut(time, breaks = "6 hours")) %>%
+  summarize(mean_temp = mean(temp, na.rm = TRUE))
+
+soil_filt_6h$interval <- as.POSIXct(soil_filt_6h$interval, format = "%Y-%m-%d %H:%M:%S")
+
+# View new data table
+soil_filt_6h
+```
+
+```{r}
+ggplot(soil_filt_6h, aes(x = interval, y = mean_temp, color = ir_freq)) +
+  geom_line() +
+  facet_wrap(~ w_amount, nrow = 2) +
+  ggtitle("Soil temperature over time (6-hourly)") +
+  xlab("Date") +
+  ylab("Temperature") +
+  geom_vline(xintercept = c("2022-12-22 12:00:00", "2022-01-07 12:00:00", "2022-01-27 12:00:00", "2022-02-10 12:00:00"), 
+             color = "red", linetype = "dashed")
+```
+
+```{r}
+ggplot(soil_filt_6h, aes(x = interval, y = mean_temp, color = w_amount)) +
+  geom_line() +
+  facet_wrap(~ ir_freq, nrow = 3) +
+  ggtitle("Soil temperature over time (6-hourly)") +
+  xlab("Date") +
+  ylab("Temperature")
+```
