@@ -1,0 +1,639 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(tidyverse)
+library(readxl)     # for reading excels files
+library(ggpmisc)
+library(lme4)
+library(car)
+```
+
+
+```{r}
+# Emergence example
+# 1. read the data from excel and change the data format to data.table
+field_raw <- "../data/raw/Field_data_Raw.xlsx"
+```
+
+
+```{r}
+# Examine what sheet names are in the workbook 
+excel_sheets(field_raw)
+
+DT <- read_excel(field_raw, "Irrigation")
+```
+
+
+```{r}
+# Overview of the data 
+DT
+```
+
+
+```{r}
+# Only select the interested variables 
+FW_field <- DT %>%
+  filter(Cult == "b") %>%
+  mutate(FW_field_nontub_g = FW_field_nontub * 1000,
+         FW_field_tub_g = FW_field_tub * 1000)
+
+FW_field_harvest <- FW_field %>%
+  drop_na(FW_field_nontub) %>%
+  dplyr::select(-CC, -spad_1, -spad_2, -spad_3, -spad_4, -Emergence, -Leaf_area_sub, -P_height_1, -P_height_2, -P_height_3, -T_air, -T_ther, -T_soil, -T_cano, -Comments)
+
+FW_field_harvest <- FW_field_harvest %>%
+  mutate(Freq = as.numeric(str_replace(Freq, "w", "")))
+```
+
+
+```{r}
+#Replace NA with 0 for specific columns
+FW_field_harvest_noNA <- FW_field_harvest %>%
+  mutate(across(14:28, ~ifelse(is.na(.), 0, .)))
+```
+
+# Remove the values for samples which were not properly dried (this may not be statistically legitimate)
+```{r}
+FW_field_harvest_noWet <- FW_field_harvest_noNA %>% 
+  mutate(DW_part_sub_tuber = ifelse(DAP == 95 & PlotID == 44, NA_real_, DW_part_sub_tuber),
+         DW_part_sub_g_stem = ifelse(DAP == 66 & PlotID %in% c(8, 12, 16, 20), NA_real_, DW_part_sub_g_stem),
+         DW_part_sub_tuber = ifelse(DAP == 38 & PlotID %in% c(1, 21, 24, 28), NA_real_, DW_part_sub_tuber),
+         FW_part_total_g_stem = ifelse(DAP == 66 & PlotID %in% c(4, 5), NA_real_, FW_part_total_g_stem))
+```
+
+#Replace the removed corrupted values with the mean of the remaining replicates
+```{r}
+FW_field_harvest_noWet <- FW_field_harvest_noWet %>% 
+  group_by(Date, Trt) %>% 
+  mutate(DW_part_sub_tuber = ifelse(is.na(DW_part_sub_tuber), mean(DW_part_sub_tuber, na.rm = TRUE), DW_part_sub_tuber),
+         DW_part_sub_g_stem = ifelse(is.na(DW_part_sub_g_stem), mean(DW_part_sub_g_stem, na.rm = TRUE), DW_part_sub_g_stem),
+         FW_part_total_g_stem = ifelse(is.na(FW_part_total_g_stem), mean(FW_part_total_g_stem, na.rm = TRUE), FW_part_total_g_stem)) %>% 
+  ungroup()  
+```
+
+
+```{r}
+# Create variables for total FW of tuber and plant (non-tuber)
+#FW_field_harvest_noNA$FW_total_nontub <- FW_field_harvest_noNA$FW_field_nontub_g + FW_field_harvest_noNA$FW_part_total_g_leaf + FW_field_harvest_noNA$FW_part_total_d_leaf + FW_field_harvest_noNA$FW_part_total_g_stem +
+#  FW_field_harvest_noNA$FW_part_total_d_stem
+#FW_field_harvest_noNA$FW_part_tot_nontub <- FW_field_harvest_noNA$FW_part_total_g_leaf + FW_field_harvest_noNA$FW_part_total_d_leaf + FW_field_harvest_noNA$FW_part_total_g_stem +
+#  FW_field_harvest_noNA$FW_part_total_d_stem
+#FW_field_harvest_noNA$FW_total_tuber <- FW_field_harvest_noNA$FW_field_tub_g + FW_field_harvest_noNA$FW_part_total_tuber
+
+FW_field_harvest_noWet <- FW_field_harvest_noWet %>% 
+  mutate(FW_total_nontub = FW_field_nontub_g + FW_part_total_g_leaf + FW_part_total_d_leaf + FW_part_total_g_stem + FW_part_total_d_stem,
+         FW_part_tot_nontub = FW_part_total_g_leaf + FW_part_total_d_leaf + FW_part_total_g_stem + FW_part_total_d_stem,
+         FW_total_tuber = FW_field_tub_g + FW_part_total_tuber)
+
+```
+
+#For Brian
+```{r}
+DF_example <- FW_field_harvest_noWet %>%
+  mutate(partFWfield = FW_field_tub_g / (FW_field_tub_g + FW_field_nontub_g))
+```
+
+```{r}
+ggplot(DF_example, aes(x = factor(Date), y = partFWfield, color = factor(Amount))) +
+  geom_boxplot() +
+  facet_wrap(~ Freq, nrow = 1) +
+  ggtitle("Tuber DM yield at different harvests") +
+  xlab("Harvest") +
+  ylab("kg DM per m2") +
+  scale_x_discrete(labels = c("1", "2", "3"))
+```
+#/For Brian
+
+```{r}
+#Calculate DMC
+FW_field_harvest_noWet <- FW_field_harvest_noWet %>%
+  mutate(DMC_g_leaf = DW_part_sub_g_leaf / FW_part_sub_g_leaf,
+         DMC_d_leaf = DW_part_sub_d_leaf / FW_part_sub_d_leaf,
+         DMC_g_stem = DW_part_sub_g_stem / FW_part_sub_g_stem,
+         DMC_d_stem = DW_part_sub_d_stem / FW_part_sub_d_stem,
+         DMC_tub = DW_part_sub_tuber / FW_part_sub_tuber) %>%
+  mutate(across(37:41, ~ifelse(is.na(.), 0, .)))
+```
+
+
+```{r}
+#Calculate FW per m2 and DM yield per m2
+FW_field_harvest_noWet <- FW_field_harvest_noWet %>%
+  mutate(FW_total_tuber_m2_kg = FW_total_tuber / HA / 1000,
+         DM_tuber_m2_kg = FW_total_tuber_m2_kg * DMC_tub)
+```
+
+
+```{r}
+#Visualise
+ggplot(FW_field_harvest_noWet %>% drop_na(DM_tuber_m2_kg), aes(x = factor(Date), y = DM_tuber_m2_kg, color = factor(Amount))) +
+  geom_boxplot() +
+  facet_wrap(~ Freq, nrow = 1) +
+  ggtitle("Tuber DM yield at different harvests") +
+  xlab("Harvest") +
+  ylab("kg DM per m2") +
+  scale_x_discrete(labels = c("1", "2", "3"))
+```
+
+
+```{r}
+#ANOVA
+# Perform ANOVA
+dw_anova <- aov(DM_tuber_m2_kg ~ Date + Amount*Freq + Amount + Freq + Rep, data = FW_field_harvest_noWet)
+
+# Summarize ANOVA results
+summary(dw_anova)
+plot(dw_anova)
+#distrbution seems normal but variance is trumpet shaped
+```
+
+
+```{r}
+shapiro.test(residuals(dw_anova))
+leveneTest(residuals(dw_anova) ~ interaction(Amount, Freq), data = FW_field_harvest_noWet)
+```
+
+
+```{r}
+# Fit a mixed-effects model with random intercepts for plots and days
+dw_anova <- lmer(DM_tuber_m2_kg ~ Amount*Freq + (1 | Date), data = FW_field_harvest_noWet)
+
+# Print the ANOVA table
+summary(dw_anova)
+plot(dw_anova)
+```
+
+
+```{r}
+# Perform regression analysis
+fw_reg <- lm(DM_tuber_m2_kg ~ Date + Amount*Freq + Amount + Freq + Rep, data = FW_field_harvest_noWet)
+
+# Summarize regression results
+summary(fw_reg)
+```
+
+#Calculate partitioning data of total harvest based on sub-samble
+```{r}
+FW_field_part <- FW_field_harvest_noWet %>%
+  dplyr::select(-Date) %>%
+  mutate(across(starts_with("FW"), ~replace(., which(is.na(.)), 0))) %>%
+  #Calculate percentage of class from total sub-sample weight
+  mutate(FW_part_g_leaf_perc = FW_part_total_g_leaf / FW_part_tot_nontub,
+         FW_part_d_leaf_perc = FW_part_total_d_leaf / FW_part_tot_nontub,
+         FW_part_g_stem_perc = FW_part_total_g_stem / FW_part_tot_nontub,
+         FW_part_d_stem_perc = FW_part_total_d_stem / FW_part_tot_nontub) %>%
+  #Calculate weight of class in total sample weight
+  mutate(FW_total_g_leaf = FW_part_g_leaf_perc * FW_total_nontub,
+         FW_total_d_leaf = FW_part_d_leaf_perc * FW_total_nontub,
+         FW_total_g_stem = FW_part_g_stem_perc * FW_total_nontub,
+         FW_total_d_stem = FW_part_d_stem_perc * FW_total_nontub) %>%
+  #Calculate FW partitioning of total biomass
+  mutate(perc_FW_total_g_leaf = FW_total_g_leaf / (FW_total_nontub + FW_total_tuber),
+         perc_FW_total_d_leaf = FW_total_d_leaf / (FW_total_nontub + FW_total_tuber),
+         perc_FW_total_g_stem = FW_total_g_stem / (FW_total_nontub + FW_total_tuber),
+         perc_FW_total_d_stem = FW_total_d_stem / (FW_total_nontub + FW_total_tuber),
+         perc_FW_total_tuber = FW_total_tuber / (FW_total_nontub + FW_total_tuber)) %>%
+  #calculate DW of class in total sample
+  mutate(DW_total_g_leaf = FW_total_g_leaf * DMC_g_leaf,
+         DW_total_d_leaf = FW_total_d_leaf * DMC_d_leaf,
+         DW_total_g_stem = FW_total_g_stem * DMC_g_stem,
+         DW_total_d_stem = FW_total_d_stem * DMC_d_stem,
+         DW_total_tuber = FW_total_tuber * DMC_tub) %>%
+  #Replace NA with 0 in new columns
+  mutate(across(57:61, ~ifelse(is.na(.), 0, .))) %>%
+  #Calculate total sample DW
+  mutate(DW_total_sample = DW_total_g_leaf + DW_total_d_leaf + DW_total_g_stem + DW_total_d_stem + DW_total_tuber) %>%
+  #Calculate DW partitioning in total sample
+  mutate(perc_DW_total_g_leaf = DW_total_g_leaf / DW_total_sample,
+         perc_DW_total_d_leaf = DW_total_d_leaf / DW_total_sample,
+         perc_DW_total_g_stem = DW_total_g_stem / DW_total_sample,
+         perc_DW_total_d_stem = DW_total_d_stem / DW_total_sample,
+         perc_DW_total_tuber = DW_total_tuber / DW_total_sample) %>%
+  mutate(Date = FW_field_harvest_noWet$Date)
+```
+```{r}
+df_leaf_m2 <- FW_field_part %>%
+  mutate(FW_gleaf_m2 = FW_total_g_leaf/2.25,
+         DW_gleaf_m2 = DW_total_g_leaf/2.25,
+         dw_gdleaf_m2 = (DW_total_g_leaf + DW_total_d_leaf)/2.25,
+         dw_gdstem_m2 = (DW_total_g_stem + DW_total_d_stem)/2.25,
+         FW_grand_totalkgm2 = (FW_total_nontub + FW_total_tuber)/2.25,
+         DW_grand_totalkgm2 = DW_total_sample/2.25)
+```
+
+#For Brian
+```{r}
+#Visualise
+ggplot(df_leaf_m2, aes(x = factor(Date), y = (FW_grand_totalkgm2*10), color = factor(Amount))) +
+  geom_boxplot() +
+  facet_wrap(~ Freq, nrow = 1) +
+  xlab("Harvest") +
+  ylab("kg FM per m2") +
+  scale_x_discrete(labels = c("1", "2", "3")) +
+  theme_minimal()
+```
+#/For Brian
+
+
+#Total DW timeline
+```{r}
+#Visualise
+ggplot(FW_field_part, aes(x = factor(Date), y = (DW_total_sample/1000), color = factor(Amount))) +
+  geom_boxplot() +
+  facet_wrap(~ Freq, nrow = 1) +
+  ggtitle("Total DM yield at different harvests") +
+  xlab("Harvest") +
+  ylab("kg DM per m2") +
+  scale_x_discrete(labels = c("1", "2", "3")) +
+  theme_minimal()
+```
+
+
+```{r}
+FW_field_part_long_FW <- FW_field_part %>%
+  dplyr::select(Trt, Date, starts_with("perc_FW_total_")) %>%
+  pivot_longer(cols = starts_with("perc_FW_total_"), names_to = "Variable", values_to = "Value")
+FW_field_part_long_FW$Date <- as.character(FW_field_part_long_FW$Date)
+ ggplot(FW_field_part_long_FW, aes(x = factor(Date), y = Value, fill = Variable)) +
+   geom_bar(position = "fill", stat = "identity") +
+   facet_wrap(~ Trt, nrow = 2) +
+   xlab("Harvest") +
+   ylab("% of total FM") +
+   scale_x_discrete(labels = c("1", "2", "3")) +
+   scale_y_continuous(labels = scales::percent_format()) +
+   guides(fill = guide_legend(reverse = TRUE)) +
+   theme_minimal() +
+   guides(fill = FALSE) #+
+   #scale_fill_manual(values = c("orange", "red", "lightgreen", "green", "blue"))
+```
+```{r}
+FW_field_part_summary <- FW_field_part_long_FW %>%
+  group_by(Trt, Date, Variable) %>%
+  summarise(avg = mean(Value), se = sd(Value) / sqrt(n()))
+```
+```{r}
+mean_FW_field_part_summary <- FW_field_part_long_FW %>%
+  group_by(Date, Variable) %>%
+  summarise(avg = mean(Value), se = sd(Value) / sqrt(n()))
+```
+
+```{r}
+FW_field_part_long_FW <- FW_field_part %>%
+  dplyr::select(Trt, Date, starts_with("perc_FW_total_")) %>%
+  pivot_longer(cols = starts_with("perc_FW_total_"), names_to = "Variable", values_to = "Value")
+FW_field_part_long_FW$Date <- as.character(FW_field_part_long_FW$Date)
+
+FW_field_part_summary <- FW_field_part_long_FW %>%
+  group_by(Trt, Date, Variable) %>%
+  summarise(avg = mean(Value), se = sd(Value) / sqrt(n()))
+
+ggplot(FW_field_part_summary, aes(x = factor(Date), y = avg, fill = Variable)) +
+  geom_bar(position = "dodge", stat = "identity", width = 0.7) +
+  geom_errorbar(aes(ymin = avg - se, ymax = avg + se), width = 0.2, position = position_dodge(width = 0.7)) +
+  facet_wrap(~ Trt, nrow = 2) +
+  xlab("Harvest") +
+  ylab("% of total FM") +
+  scale_x_discrete(labels = c("1", "2", "3")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  theme_minimal() +
+  guides(fill = FALSE)
+```
+
+
+#Partitioning timeline
+```{r}
+ggplot(FW_field_part, aes(x = factor(Date))) +
+  geom_boxplot(aes(y = perc_DW_total_g_leaf, fill = "perc_DW_total_g_leaf")) +
+  geom_boxplot(aes(y = perc_DW_total_d_leaf, fill = "perc_DW_total_d_leaf")) +
+  geom_boxplot(aes(y = perc_DW_total_g_stem, fill = "perc_DW_total_g_stem")) +
+  geom_boxplot(aes(y = perc_DW_total_d_stem, fill = "perc_DW_total_d_stem")) +
+  geom_boxplot(aes(y = perc_DW_total_tuber, fill = "perc_DW_total_tuber")) +
+  facet_wrap(~ Trt, nrow = 2) +
+  ggtitle("DM partitioning at different harvests") +
+  xlab("Harvest") +
+  ylab("% of total DM") +
+  scale_x_discrete(labels = c("1", "2", "3")) +
+  scale_fill_manual(values = c("blue", "green", "red", "orange", "purple"))
+```
+```{r}
+FW_field_part_long <- FW_field_part %>%
+  dplyr::select(Trt, Date, starts_with("perc_DW_total_")) %>%
+  pivot_longer(cols = starts_with("perc_DW_total_"), names_to = "Variable", values_to = "Value")
+FW_field_part_long$Date <- as.character(FW_field_part_long$Date)
+ ggplot(FW_field_part_long, aes(x = factor(Date), y = Value, fill = Variable)) +
+   geom_bar(position = "fill", stat = "identity") +
+   facet_wrap(~ Trt, nrow = 2) +
+   ggtitle("DM partitioning at different harvests") +
+   xlab("Harvest") +
+   ylab("% of total DM") +
+   scale_x_discrete(labels = c("1", "2", "3")) +
+   scale_y_continuous(labels = scales::percent_format()) +
+   guides(fill = guide_legend(reverse = TRUE))
+```
+```{r}
+df_part_median <- FW_field_part %>%
+  group_by(Trt, Date, Amount, Freq) %>%
+  summarize(median_percGLeaf = median(perc_FW_total_g_leaf),
+            median_perctub = median(perc_FW_total_tuber),
+            median_percDLeaf = median(perc_FW_total_d_leaf),
+            median_percGStem = median(perc_FW_total_g_stem),
+            median_percDStem = median(perc_FW_total_d_stem))
+```
+```{r}
+df_part_mean_se <- FW_field_part %>%
+  group_by(Date) %>%
+  summarise(mean_percGLeaf = mean(perc_FW_total_g_leaf)*100,
+            mean_perctub = mean(perc_FW_total_tuber)*100,
+            mean_percDLeaf = mean(perc_FW_total_d_leaf)*100,
+            mean_percGStem = mean(perc_FW_total_g_stem)*100,
+            mean_percDStem = mean(perc_FW_total_d_stem)*100,
+            se_mean_GLeaf = sd(perc_FW_total_g_leaf)/sqrt(n())*100,
+            se_mean_tub = sd(perc_FW_total_tuber)/sqrt(n())*100,
+            se_mean_DLeaf = sd(perc_FW_total_d_leaf)/sqrt(n())*100,
+            se_mean_GStem = sd(perc_FW_total_g_stem)/sqrt(n())*100,
+            se_mean_DStem = sd(perc_FW_total_d_stem)/sqrt(n())*100)
+```
+
+```{r}
+kruskal.test(median_percGLeaf ~ interaction(Amount, Freq), data = df_part_median)
+kruskal.test(median_perctub ~ interaction(Amount, Freq), data = df_part_median)
+kruskal.test(median_percDLeaf ~ interaction(Amount, Freq), data = df_part_median)
+kruskal.test(median_percGStem ~ interaction(Amount, Freq), data = df_part_median)
+kruskal.test(median_percDStem ~ interaction(Amount, Freq), data = df_part_median)
+```
+```{r}
+kruskal.test(median_percGLeaf ~ Amount, data = df_part_median)
+kruskal.test(median_perctub ~ Amount, data = df_part_median)
+kruskal.test(median_percDLeaf ~ Amount, data = df_part_median)
+kruskal.test(median_percGStem ~ Amount, data = df_part_median)
+kruskal.test(median_percDStem ~ Amount, data = df_part_median)
+```
+```{r}
+kruskal.test(median_percGLeaf ~ Freq, data = df_part_median)
+kruskal.test(median_perctub ~ Freq, data = df_part_median)
+kruskal.test(median_percDLeaf ~ Freq, data = df_part_median)
+kruskal.test(median_percGStem ~ Freq, data = df_part_median)
+kruskal.test(median_percDStem ~ Freq, data = df_part_median)
+```
+```{r}
+#ANOVA
+# Perform ANOVA
+part_anova_tuber <- aov(perc_DW_total_g_leaf ~ Date + Amount*Freq + Amount + Freq + Rep, data = FW_field_part)
+
+# Summarize ANOVA results
+summary(part_anova_tuber)
+plot(part_anova_tuber)
+```
+
+```{r}
+# Fit a mixed-effects model with random intercepts for plots and days
+tub_per_anova <- lmer(perc_FW_total_tuber ~ Amount*Freq + (1 | Date), data = FW_field_part)
+
+# Print the ANOVA table
+summary(tub_per_anova)
+```
+
+#Include final harvest
+```{r}
+df_final_harvest <- read_excel("../data/raw/Final_Harvest/Final_Harvest_Data.xlsx", sheet = "Corrected", col_names = TRUE, range = "A1:P25")
+df_quality <- read_excel("../data/raw/Quality data/Tuber_quality.xlsx", sheet = "Post_Harvest", col_names = TRUE, range = "AI1:AI25")
+```
+
+
+```{r}
+df_final_harvest_filt <- df_final_harvest %>%
+  dplyr::select(plot = Plot_n, treatment = Treatment, matches("_w$")) %>%
+  mutate(across(everything(), ~ifelse(is.na(.), 0, .)))
+```
+
+
+```{r}
+df_final_harvest_filt <- df_final_harvest_filt %>%
+  mutate(w_amount = case_when(
+    treatment %in% c("1", "2", "3") ~ 1,
+    treatment %in% c("4", "5", "6") ~ 0.65,
+    TRUE ~ NA_real_
+  )) %>% 
+  mutate(
+  ir_freq = case_when(
+    treatment %in% c("1", "4") ~ 1,
+    treatment %in% c("2", "5") ~ 2,
+    treatment %in% c("3", "6") ~ 3,
+    TRUE ~ NA_real_
+  ))
+df_final_harvest_filt$w_amount <- as.factor(df_final_harvest_filt$w_amount)
+df_final_harvest_filt$ir_freq <- as.factor(df_final_harvest_filt$ir_freq)
+#df_final_harvest_filt$plot <- as.factor(df_final_harvest_filt$plot)
+df_final_harvest_filt$treatment <- as.factor(df_final_harvest_filt$treatment)
+```
+
+```{r}
+df_FH_total_y <- df_final_harvest_filt %>%
+  mutate(fw_tot_tub = rowSums(dplyr::select(., ">90mm_w":"Growth_crack_w"), na.rm = TRUE),
+         date = as.Date("2023-02-24"))
+
+df_FH_total_y <- df_FH_total_y %>%
+  mutate(fw_tot_tub_m2 = fw_tot_tub / 11.43)
+```
+
+```{r}
+df_FH_merged <- bind_cols(df_FH_total_y, df_quality)
+
+#df_FH_merged <- df_FH_merged %>%
+  #mutate(dw_tot_tub_m2 = fw_tot_tub * Dry_Matter_Content3)
+df_FH_merged$dw_tot_tub_m2 = df_FH_merged$fw_tot_tub_m2 * df_FH_merged$Dry_Matter_Content2
+```
+
+```{r}
+df_FH_total_y_kg_m2 <- df_FH_merged %>%
+  dplyr::select(date, plot, treatment, w_amount, ir_freq, fw_tot_tub_m2, dw_tot_tub_m2)
+
+```
+
+
+
+#Join together IH and FH
+```{r}
+FW_field_IH <- FW_field_part %>%
+  dplyr::select(date = Date, DAP, Rep, plot = PlotID, treatment = Trt, w_amount = Amount, ir_freq = Freq, fw_tot_tub_m2 = FW_total_tuber_m2_kg, dw_tot_tub_m2 = DM_tuber_m2_kg)
+
+FW_field_IH$w_amount <- as.factor(FW_field_IH$w_amount)
+FW_field_IH$ir_freq <- as.factor(FW_field_IH$ir_freq)
+FW_field_IH$plot <- as.factor(FW_field_IH$plot)
+FW_field_IH$treatment <- as.factor(FW_field_IH$treatment)
+```
+
+```{r}
+mean_se_fw_IH <- FW_field_IH %>% 
+  group_by(date, ir_freq, w_amount) %>% 
+  summarize(mean = mean(fw_tot_tub_m2),
+            se = sd(fw_tot_tub_m2)/sqrt(n()))
+```
+```{r}
+df_3rd_ih <- filter(FW_field_IH, DAP == 95)
+
+```
+
+```{r}
+#ANOVA
+# Perform ANOVA
+FH_tub_fw_3rd <- aov(fw_tot_tub_m2 ~ w_amount*ir_freq + w_amount + ir_freq + Rep, data = df_3rd_ih)
+
+# Summarize ANOVA results
+summary(FH_tub_fw_3rd)
+plot(FH_tub_fw_3rd)
+```
+
+```{r}
+#Visualise
+ggplot(FW_field_IH, aes(x = factor(date), y = (fw_tot_tub_m2), color = w_amount)) +
+  geom_boxplot() +
+  facet_wrap(~ ir_freq, nrow = 1) +
+  xlab("Harvest") +
+  ylab("kg FM per m2") +
+  guides(color = FALSE) +
+  scale_x_discrete(labels = c("IH1", "IH2", "IH3")) +
+  theme_minimal() +
+  scale_color_manual(values = c("red", "blue"))
+```
+
+
+
+```{r}
+df_FH_total_y_kg_m2_bind <- df_FH_total_y_kg_m2
+
+df_FH_total_y_kg_m2_bind$plot <- as.factor(df_FH_total_y_kg_m2_bind$plot)
+
+```
+
+
+```{r}
+df_IH_FH_merged <- bind_rows(df_FH_total_y_kg_m2_bind, FW_field_IH)
+df_IH_FH_merged$ir_freq <- gsub("w", "", df_IH_FH_merged$ir_freq)
+```
+
+```{r}
+#Visualise
+ggplot(df_IH_FH_merged, aes(x = factor(date), y = (fw_tot_tub_m2), color = w_amount)) +
+  geom_boxplot() +
+  facet_wrap(~ ir_freq, nrow = 1) +
+  ggtitle("Total FM tuber yield at different harvests") +
+  xlab("Harvest") +
+  ylab("kg FM per m2") +
+  scale_x_discrete(labels = c("IH1", "IH2", "IH3", "FH"))
+```
+
+```{r}
+#Visualise
+ggplot(df_IH_FH_merged, aes(x = factor(date), y = (dw_tot_tub_m2), color = w_amount)) +
+  geom_boxplot() +
+  facet_wrap(~ ir_freq, nrow = 1) +
+  ggtitle("Total DM tuber yield at different harvests") +
+  xlab("Harvest") +
+  ylab("kg DM per m2") +
+  scale_x_discrete(labels = c("IH1", "IH2", "IH3", "FH"))
+```
+
+```{r}
+# Create a new column "rep" using case_when and mutate functions
+
+df_FH_total_y_kg_m2 <- df_FH_total_y_kg_m2 %>%
+  mutate(rep = case_when(
+    plot >= 1 & plot <= 12 ~ 1,
+    plot >= 13 & plot <= 24 ~ 2,
+    plot >= 25 & plot <= 36 ~ 3,
+    plot >= 37 & plot <= 48 ~ 4,
+    TRUE ~ NA_real_
+  ))
+df_FH_total_y_kg_m2$rep <- as.factor(df_FH_total_y_kg_m2$rep)
+```
+
+```{r}
+#Visualise
+ggplot(df_FH_total_y_kg_m2, aes(x = ir_freq, y = (dw_tot_tub_m2), color = w_amount)) +
+  geom_boxplot() +
+  ggtitle("Total DM tuber yield at final harvest") +
+  xlab("Frequency") +
+  ylab("kg DM per m2")
+```
+```{r}
+#Visualise
+ggplot(df_FH_total_y_kg_m2, aes(x = ir_freq, y = (fw_tot_tub_m2), color = w_amount)) +
+  geom_boxplot() +
+  xlab("Irrigation interval") +
+  ylab("kg FM per m2") +
+  guides(color = FALSE) +
+  #labs(color = "Irrigation level") +
+  theme_minimal() +
+  scale_color_manual(values = c("red", "blue"))
+```
+
+```{r}
+mean_se_fw <- df_FH_total_y_kg_m2 %>% 
+  group_by(ir_freq, w_amount) %>% 
+  summarize(mean = mean(fw_tot_tub_m2),
+            se = sd(fw_tot_tub_m2)/sqrt(n()))
+
+mean_se_fw_w_amount <- df_FH_total_y_kg_m2 %>% 
+  group_by(w_amount) %>% 
+  summarize(mean = mean(fw_tot_tub_m2),
+            se = sd(fw_tot_tub_m2)/sqrt(n()))
+
+mean_se_fw_ir_freq <- df_FH_total_y_kg_m2 %>% 
+  group_by(ir_freq) %>% 
+  summarize(mean = mean(fw_tot_tub_m2),
+            se = sd(fw_tot_tub_m2)/sqrt(n()))
+```
+
+```{r}
+#ANOVA
+# Perform ANOVA
+FH_tub_fw <- aov(fw_tot_tub_m2 ~ w_amount*ir_freq + w_amount + ir_freq + rep, data = df_FH_total_y_kg_m2)
+
+# Summarize ANOVA results
+summary(FH_tub_fw)
+plot(FH_tub_fw)
+```
+```{r}
+library(emmeans)
+emmeans(FH_tub_fw, ~ w_amount * ir_freq)
+```
+
+
+```{r}
+TukeyHSD(FH_tub_fw)
+```
+```{r}
+# Load the multcompView package
+library(multcompView)
+
+# Run the ANOVA
+FH_tub_fw <- aov(fw_tot_tub_m2 ~ w_amount*ir_freq + w_amount + ir_freq + rep, data = df_FH_total_y_kg_m2)
+
+# Perform Tukey's HSD test
+tukey_res <- TukeyHSD(FH_tub_fw)
+
+# Get the letter codes
+letter_codes <- multcompLetters(tukey_res$`w_amount`)
+
+# Visualize the data
+ggplot(df_FH_total_y_kg_m2, aes(x = ir_freq, y = (fw_tot_tub_m2), color = w_amount)) +
+  geom_boxplot() +
+  xlab("Irrigation interval") +
+  ylab("kg FM per m2") +
+  # guides(color = FALSE) +
+  labs(color = "Irrigation level") +
+  theme_minimal() +
+  # Add the letter codes
+  geom_text(data = letter_codes, aes(x = ir_freq, y = fw_tot_tub_m2, label = mcp), size = 5)
+
+```
+

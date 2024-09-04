@@ -1,0 +1,286 @@
+---
+title: "Untitled"
+author: "JK"
+date: "2023-03-14"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(car)
+library(cowplot)
+```
+
+```{r}
+# Emergence example
+# 1. read the data from excel and change the data format to data.table
+poro_raw <- paste0("C:/Users/",  Sys.getenv("USERNAME"),"/OneDrive - Wageningen University & Research/thesis_josias_brian_shared/Josias and Brian/data/processed/Porometer_folder/Porometer_edited.csv")
+```
+
+
+```{r}
+# Examine what sheet names are in the workbook 
+
+DT <- read_csv(poro_raw)
+```
+
+```{r}
+# Only select the interested variables 
+df_poro <- DT %>%
+  mutate(Freq = as.numeric(str_replace(Freq, "w", ""))) %>%
+  select(Date, Plot, Trt, w_amount = Amount, ir_freq = Freq, Rep, Resist)
+
+df_poro <- df_poro %>%
+  mutate(Resist_s_m = Resist / 100,
+         gs = 1 / Resist_s_m)
+
+df_poro_nooutlier <- df_poro %>%
+  slice(-910) #Delete outlier
+
+df_poro_ms <- df_poro_nooutlier %>%
+  group_by(Date, w_amount, ir_freq, Plot, Rep, Trt) %>%
+  summarise(daily_gs = mean(gs),
+            d_med_gs = median(gs))
+
+df_poro_ms$w_amount <- as.factor(df_poro_ms$w_amount)
+df_poro_ms$ir_freq <- as.factor(df_poro_ms$ir_freq)
+df_poro_ms$date <- dmy(df_poro_ms$Date)
+```
+
+```{r}
+ggplot(df_poro_ms, aes(factor(date), daily_gs, color = factor(w_amount))) +
+  geom_boxplot() +
+  facet_wrap(~ ir_freq, ncol = 1) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  guides(color = FALSE) +
+  xlab("Date") +
+  ylab("Stomatal conductance (s m-1)")
+
+
+```
+```{r}
+ggplot(df_poro_ms, aes(factor(date), d_med_gs, color = factor(w_amount))) +
+  geom_boxplot() +
+  facet_wrap(~ ir_freq, ncol = 1) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  guides(color = FALSE) +
+  xlab("Date") +
+  ylab("Stomatal conductance")
+```
+##Draw a line with errorbar graph
+
+steps:  
+
+1. summaries data with mean and se  
+2. plot as line with error bars   
+3. specified the colors 
+
+```{r}
+## Copied from line 41
+df_poro_ms <- df_poro_nooutlier %>%
+  # group on the treatment levels
+  group_by(Date, w_amount, ir_freq, Trt) %>%
+  summarise(daily_gs = mean(gs),
+            d_med_gs = median(gs),
+            # need number of observation in each group
+            no.of.obs = n(),
+            # need sd for each group 
+            daily_gs_sd = sd(gs),
+            # calculate the se 
+            se = daily_gs_sd/sqrt(no.of.obs))
+
+df_poro_ms$w_amount <- as.factor(df_poro_ms$w_amount)
+df_poro_ms$ir_freq <- as.factor(df_poro_ms$ir_freq)
+df_poro_ms$date <- dmy(df_poro_ms$Date)
+p_poro_lineErr <- df_poro_ms %>% 
+  ggplot(aes(date, daily_gs, color = w_amount)) +
+  geom_line()+
+  # add errorbars
+  geom_errorbar(aes(ymin = daily_gs - se, ymax = daily_gs+se), width = 1) +
+  facet_wrap(~ ir_freq, ncol = 1) + 
+  # specified colors 
+  scale_color_manual(values = c("red", "blue")) + 
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        text = element_text(size = 14)) +
+  guides(color = FALSE) +
+  xlab("Date") +
+  scale_x_date(date_breaks = "1 weeks", date_labels =  "%b %d") +
+  ylab(bquote("Stomatal conductance s " ~ m^{-1}))
+p_poro_lineErr
+
+```
+
+```{r}
+anova_ms <- aov(daily_gs ~ w_amount*ir_freq + w_amount + ir_freq, data = df_poro_ms)
+summary(anova_ms)
+plot(anova_ms)
+```
+
+```{r}
+TukeyHSD(anova_ms)
+```
+
+
+```{r}
+kruskal.test(d_med_gs ~ interaction(w_amount, ir_freq), data = df_poro_ms)
+```
+
+#Cowplot
+```{r}
+# Subset the data for each level of ir_freq
+df_merged_freq1 <- filter(df_poro_ms, ir_freq == 1)
+df_merged_freq2 <- filter(df_poro_ms, ir_freq == 2)
+df_merged_freq3 <- filter(df_poro_ms, ir_freq == 3)
+```
+
+```{r}
+# Create a separate ggplot for each subset
+plot_freq1_dt <- ggplot(df_merged_freq1, aes(x = factor(date), y = daily_gs, color = factor(w_amount))) +
+  geom_boxplot() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12)) +
+  ggtitle("Stomatal conductance (s m-1) (ir_freq = 1)") +
+  ylab("Stomatal conductance (s m-1)") +
+  xlab("Date") +
+  labs(color = "Water amount")
+  
+```
+
+
+```{r}
+plot_freq2_dt <- ggplot(df_merged_freq2, aes(x = factor(date), y = daily_gs, color = factor(w_amount))) +
+  geom_boxplot() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12)) +  ggtitle("FLIR: Daily temperature over time (ir_freq = 2)") +
+  ylab("Stomatal conductance (s m-1)") +
+  xlab("Date") +
+  labs(color = "Water amount")
+```
+
+
+```{r}
+plot_freq3_dt <- ggplot(df_merged_freq3, aes(x = factor(date), y = daily_gs, color = factor(w_amount))) +
+  geom_boxplot() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12)) +  ggtitle("FLIR: Daily temperature over time (ir_freq = 3)") +
+  ylab("Stomatal conductance (s m-1)") +
+  xlab("Date") +
+  labs(color = "Water amount")
+```
+
+#Read in irrigation data
+```{r}
+df_irrigation <- read_excel(paste0("C:/Users/", Sys.getenv("USERNAME"), "/OneDrive - Wageningen University & Research/thesis_josias_brian_shared/Josias and Brian//data/raw/EasyManagement.xlsx"),
+                            sheet = "irr_minutes", col_names = TRUE, range = "A1:G37")
+
+
+df_irrigation <- df_irrigation%>%
+  slice(4:n()) %>%
+  mutate(rel_irr2 = T2/T1,
+         rel_irr3 = T3/T1
+        )
+```
+
+#Make relative irrigaton plot
+```{r}
+plot_rel_irr <- ggplot(df_irrigation, aes(x = as.Date(Date))) +
+  geom_line(aes(y = rel_irr2, color = "blue")) +
+  geom_line(aes(y = rel_irr3, color = "red")) +
+  scale_color_manual(values = c("blue" = "blue", "red" = "red"),
+                     labels = c("Freq 2", "Freq 3")) +
+  labs(color = "Frequency") +
+  theme(axis.title.x = element_blank()) +
+  ylab("Irrigation relative to \n frequency 1") +
+  theme_minimal() +
+  guides(color = FALSE)
+
+plot_rel_irr
+grob_rel_irr <- ggplotGrob(plot_rel_irr)
+```
+
+```{r, fig.width=10, fig.height=10}
+#plot_grid(grob_rel_irr, grob_deltaT, ncol = 1, height = c(0.1, 4))
+# create a theme function to modify the plot margin 
+theme_no_xaxis <- function(){
+ #  theme_classic()+
+  theme(axis.title.x = element_blank(), # remove unnecessary x axis
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(),
+        legend.position = "none", # strip the legend
+        # set plot margin to 0 
+        plot.margin = unit(c(0,0,0,0), "mm"))
+}
+
+# a new irrigation plot for the composite 
+plot_rel_irr2 <- ggplot(df_irrigation, aes(x = as.Date(Date))) +
+  geom_line(aes(y = rel_irr2, color = "blue")) +
+  geom_line(aes(y = rel_irr3, color = "red")) +
+  scale_color_manual(values = c("blue" = "blue", "red" = "red"),
+                     labels = c("Freq 2", "Freq 3")) +
+  labs(color = "Frequency") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12)) +
+  #theme_no_xaxis()+
+  # theme(plot.margin = unit(c(1,1,1,1), "lines"))+
+  ylab("Irrigation relative \n to frequency 1") +
+  guides(color = FALSE) +
+  theme(axis.title.x = element_blank())
+
+# get the legend from the first irrigation plot
+legend_irr <- get_legend(plot_rel_irr)
+# get the legend for the frequence 
+legend_freq <- get_legend(plot_freq1_dt)
+# create the main plot 
+main_dt <- plot_grid(plot_rel_irr2, 
+          NULL, # use null and negative values in the rel_height to reduce the gap
+          plot_freq1_dt +   
+            theme_no_xaxis() +
+            ggtitle("") , # remove title 
+          NULL,
+          plot_freq2_dt +   
+            theme_no_xaxis() +
+            ggtitle(""),
+          NULL,
+          plot_freq3_dt + theme(legend.position = "none") +
+            ggtitle(""),
+          align = "hv", ncol = 1, axis = "tb",
+          labels = c("a", "", "b", "", "c", "","d"), 
+          label_x = 0.1, label_y = 0.9,
+          rel_heights = c(1, -0.1, 1, -0.3, 1, -0.3, 1))
+# assemble the legend
+legend <- plot_grid(legend_irr, legend_freq, ncol = 1)
+# assemble legend and main plot 
+plot_grid(main_dt, rel_widths = c(0.9, 0.1))
+```
+
+
+```{r fig.width=7, fig.height=6}
+p_poro_lineErr
+
+plot_rel_irr
+plot_grid(plot_rel_irr +
+            scale_x_date(limits = range(df_poro_ms$date), 
+                         date_breaks = "1 weeks", date_labels =  "%b %d") +
+            theme(
+              axis.title.x = element_blank(),
+                  axis.text.x = element_blank(),
+                  plot.margin = unit(c(0, 0,-0.5, 0), units = "mm")),
+          NULL, 
+          p_poro_lineErr+
+            scale_x_date(limits = range(df_poro_ms$date), 
+                         date_breaks = "1 weeks", date_labels =  "%b %d"),
+          ncol = 1, align = "v", rel_heights = c(0.25,0,  0.75))
+```
+
